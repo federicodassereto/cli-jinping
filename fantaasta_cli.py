@@ -1,3 +1,4 @@
+import atexit
 import shlex
 import os
 import sys
@@ -28,6 +29,7 @@ class FantaCLI:
     def __init__(self) -> None:
         """Inizializza la CLI, il database e l'autocompletamento."""
         self.db = FantaDatabase('asta.db')
+        atexit.register(self.db.close)
         
         # Importazione del listone se disponibile
         success, count, msg = self.db.import_listone_csv('listone.csv')
@@ -89,6 +91,12 @@ class FantaCLI:
                 self.do_roster(args[0])
         elif cmd == 'undo':
             self.do_undo()
+        elif cmd == 'remove':
+            self.do_remove(args)
+        elif cmd == 'move':
+            self.do_move(args)
+        elif cmd in ('price', 'edit_price'):
+            self.do_price(args)
         elif cmd == 'export':
             self.do_export(args[0] if args else 'rosters.csv')
         elif cmd == 'backup':
@@ -110,6 +118,9 @@ class FantaCLI:
         table.add_column("Descrizione", style="white")
         table.add_row("setup", "Configura budget iniziale e squadre.")
         table.add_row('buy "Giocatore" "Squadra" Prezzo', "Compra un giocatore.")
+        table.add_row('price "Giocatore" Prezzo ["Squadra"]', "Modifica il prezzo di un giocatore acquistato.")
+        table.add_row('move "Giocatore" "NuovaSquadra"', "Sposta un giocatore erroneamente assegnato a un'altra squadra.")
+        table.add_row('remove "Giocatore" ["Squadra"]', "Rimuove l'acquisto di un giocatore specifico.")
         table.add_row("status", "Mostra i budget rimanenti e i giocatori totali.")
         table.add_row("recap_roles", "Tabella dei giocatori acquistati divisi per ruolo.")
         table.add_row("recap_budget", "Dettaglio spesa per ruolo (valore assoluto e percentuale).")
@@ -151,6 +162,14 @@ class FantaCLI:
                 teams_list.append(t)
         
         self.db.setup_teams(teams_list)
+        
+        # Importazione del listone se disponibile
+        success, count, msg = self.db.import_listone_csv('listone.csv')
+        if success and count > 0:
+            rprint(f"[bold green]{msg}[/bold green] ({count} giocatori)")
+        elif not success:
+            rprint(f"[bold yellow]Attenzione Listone: {msg}[/bold yellow]")
+        
         console.print("[bold green]Setup completato! Dati salvati nel database SQLite permanente.[/bold green]")
 
     def do_buy(self, args: List[str]) -> None:
@@ -179,6 +198,12 @@ class FantaCLI:
             return
             
         player_id, player_name, player_role = player_data
+
+        # Verifica acquisto duplicato
+        existing_team = self.db.is_player_purchased(player_id)
+        if existing_team:
+            console.print(f"[bold red]❌ Errore: {player_name} è già stato acquistato da '{existing_team}'.[/bold red]")
+            return
 
         # Verifica limiti ruolo
         role_limits = {'P': 3, 'D': 8, 'C': 8, 'A': 6}
@@ -343,6 +368,125 @@ class FantaCLI:
         pname, team, price = result
         console.print(f"[bold yellow]Annullato l'acquisto di {pname} per {team} a {price} crediti.[/bold yellow]")
 
+    def do_remove(self, args: List[str]) -> None:
+        """Rimuove l'acquisto di uno specifico giocatore (opzionalmente filtrando per squadra)."""
+        if len(args) < 1:
+            console.print("[red]Uso: remove <nome_giocatore> [nome_squadra][/red]")
+            return
+
+        player_name = args[0]
+        team_name = args[1] if len(args) > 1 else None
+
+        result = self.db.remove_purchase_by_player(player_name, team_name)
+        if not result:
+            if team_name:
+                console.print(f"[yellow]Nessun acquisto trovato per il giocatore '{player_name}' nella squadra '{team_name}'.[/yellow]")
+            else:
+                console.print(f"[yellow]Nessun acquisto trovato per il giocatore '{player_name}'.[/yellow]")
+            return
+
+        pname, team, price = result
+        console.print(f"[bold yellow]🗑️  Rimosso l'acquisto di {pname} da {team} ({price} crediti restituiti).[/bold yellow]")
+
+    def do_price(self, args: List[str]) -> None:
+        """Modifica il prezzo di un acquisto effettuato."""
+        if len(args) < 2:
+            console.print("[red]Uso: price <nome_giocatore> <nuovo_prezzo> [nome_squadra][/red]")
+            return
+
+        player_name = args[0]
+        try:
+            new_price = int(args[1])
+            if new_price < 0:
+                console.print("[red]Errore: il prezzo deve essere maggiore o uguale a 0.[/red]")
+                return
+        except ValueError:
+            console.print("[red]Errore: il nuovo prezzo deve essere un numero intero.[/red]")
+            return
+
+        team_name = args[2] if len(args) > 2 else None
+
+        purchase = self.db.get_purchase_by_player(player_name, team_name)
+        if not purchase:
+            if team_name:
+                console.print(f"[yellow]Nessun acquisto trovato per il giocatore '{player_name}' nella squadra '{team_name}'.[/yellow]")
+            else:
+                console.print(f"[yellow]Nessun acquisto trovato per il giocatore '{player_name}'.[/yellow]")
+            return
+
+        purchase_id, pname, tname, old_price, role = purchase
+
+        if new_price == old_price:
+            console.print(f"[yellow]Il prezzo di {pname} per {tname} è già {new_price} crediti.[/yellow]")
+            return
+
+        # Verifica budget se il nuovo prezzo è più alto
+        diff = new_price - old_price
+        if diff > 0:
+            budget = self.db.get_config('budget', 500)
+            spent = self.db.get_team_spent(tname)
+            if spent + diff > budget:
+                console.print(f"[bold yellow]Attenzione: con questo aumento ({old_price} ➔ {new_price}) la squadra {tname} sfora il budget (Rimanenti: {budget - spent}, richiesti: +{diff}).[/bold yellow]")
+                confirm = input("Procedere lo stesso? (S/N) ").strip().lower()
+                if confirm != 's':
+                    return
+
+        self.db.update_purchase_price(purchase_id, new_price)
+        diff_str = f"+{diff}" if diff > 0 else f"{diff}"
+        console.print(f"[bold green]💰 Prezzo di {pname} ({tname}) aggiornato: {old_price} ➔ {new_price} crediti ({diff_str}).[/bold green]")
+
+    def do_move(self, args: List[str]) -> None:
+        """Sposta un giocatore acquistato da una squadra a un'altra."""
+        if len(args) < 2:
+            console.print("[red]Uso: move <nome_giocatore> <nuova_squadra> [vecchia_squadra][/red]")
+            return
+
+        player_name = args[0]
+        new_team = args[1]
+        old_team_filter = args[2] if len(args) > 2 else None
+
+        if not self.db.team_exists(new_team):
+            console.print(f"[red]Errore: la squadra di destinazione '{new_team}' non esiste.[/red]")
+            return
+
+        purchase = self.db.get_purchase_by_player(player_name, old_team_filter)
+        if not purchase:
+            if old_team_filter:
+                console.print(f"[yellow]Nessun acquisto trovato per il giocatore '{player_name}' nella squadra '{old_team_filter}'.[/yellow]")
+            else:
+                console.print(f"[yellow]Nessun acquisto trovato per il giocatore '{player_name}'.[/yellow]")
+            return
+
+        purchase_id, pname, old_team, price, role = purchase
+
+        if old_team.lower() == new_team.lower():
+            console.print(f"[yellow]Il giocatore {pname} appartiene già alla squadra {new_team}.[/yellow]")
+            return
+
+        # Verifica limiti di ruolo per la nuova squadra
+        role_limits = {'P': 3, 'D': 8, 'C': 8, 'A': 6}
+        current_count = self.db.count_team_role(new_team, role)
+        max_allowed = role_limits.get(role, 0)
+
+        if max_allowed > 0 and current_count >= max_allowed:
+            console.print(f"[bold red]❌ Errore: La squadra di destinazione {new_team} ha già raggiunto il limite massimo ({max_allowed}) per il ruolo {role}.[/bold red]")
+            return
+
+        # Verifica budget per la nuova squadra
+        budget = self.db.get_config('budget', 500)
+        spent = self.db.get_team_spent(new_team)
+
+        if spent + price > budget:
+            console.print(f"[bold yellow]Attenzione: la squadra di destinazione {new_team} non ha abbastanza crediti (Rimanenti: {budget - spent}, prezzo giocatore: {price}).[/bold yellow]")
+            confirm = input("Procedere lo stesso? (S/N) ").strip().lower()
+            if confirm != 's':
+                return
+
+        self.db.update_purchase_team(purchase_id, new_team)
+        console.print(f"[bold green]🔄 {pname} [{role}] spostato con successo da '{old_team}' a '{new_team}' (Costo: {price} crediti).[/bold green]")
+
+
+
     def do_reset(self) -> None:
         """Esegue backup e svuota le tabelle per riniziare l'asta."""
         confirm = input("Sei sicuro di voler resettare tutta l'asta? (Verrà creato un backup) [S/N]: ").strip().lower()
@@ -361,7 +505,7 @@ class FantaCLI:
             return
 
         self.db.clear_auction_data()
-        console.print("[bold yellow]L'asta è stata resettata completamente. Digita 'setup' per iniziare una nuova asta.[/bold yellow]")
+        console.print("[bold yellow]L'asta è stata resettata completamente (incluso il listone giocatori). Digita 'setup' per reimportare il listone e iniziare una nuova asta.[/bold yellow]")
 
     def do_restore(self, filename: str) -> None:
         """Sovrascrive il DB attuale con un DB di backup."""

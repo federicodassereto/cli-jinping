@@ -19,7 +19,7 @@ class FantaCompleter(Completer):
         """
         self.db = db
         self.commands = [
-            'setup', 'buy', 'status', 'recap_roles', 'recap_budget', 
+            'setup', 'buy', 'price', 'move', 'remove', 'status', 'recap_roles', 'recap_budget', 
             'roster', 'undo', 'export', 'backup', 'reset', 'restore', 'exit', 'help'
         ]
 
@@ -67,3 +67,99 @@ class FantaCompleter(Completer):
                     if ' ' in team_name:
                         team_name = f'"{team_name}"'
                     yield Completion(team_name, start_position=-len(word))
+
+        # Completamento intelligente per il comando 'remove'
+        elif text_before.startswith('remove '):
+            try:
+                to_parse = text_before
+                if to_parse.count('"') % 2 != 0:
+                    to_parse += '"'
+                args = shlex.split(to_parse)
+            except Exception:
+                args = text_before.split()
+
+            # Argomento 1: Nome Giocatore acquistato
+            if len(args) == 2 or (len(args) == 1 and text_before.endswith(' ')):
+                search = word.replace('"', '')
+                purchased_players = self.db.search_purchased_players(search, limit=15)
+                for pid, name, team, role, fanta_team, price in purchased_players:
+                    name_esc = f'"{name}"'
+                    display_text = f'[{role}] {name} ({fanta_team} - {price} cr)'
+                    yield Completion(name_esc, start_position=-len(word), display=display_text)
+
+            # Argomento 2: Nome Squadra (opzionale)
+            elif len(args) == 3 or (len(args) == 2 and text_before.endswith(' ')):
+                search = word.replace('"', '')
+                teams = self.db.search_teams_by_name(search)
+                for team_name in teams:
+                    if ' ' in team_name:
+                        team_name = f'"{team_name}"'
+                    yield Completion(team_name, start_position=-len(word))
+
+        # Completamento intelligente per il comando 'price' / 'edit_price'
+        elif text_before.startswith('price ') or text_before.startswith('edit_price '):
+            try:
+                to_parse = text_before
+                if to_parse.count('"') % 2 != 0:
+                    to_parse += '"'
+                args = shlex.split(to_parse)
+            except Exception:
+                args = text_before.split()
+
+            # Argomento 1: Nome Giocatore acquistato
+            if len(args) == 2 or (len(args) == 1 and text_before.endswith(' ')):
+                search = word.replace('"', '')
+                purchased_players = self.db.search_purchased_players(search, limit=15)
+                for pid, name, team, role, fanta_team, price in purchased_players:
+                    name_esc = f'"{name}"'
+                    display_text = f'[{role}] {name} ({fanta_team} - {price} cr)'
+                    yield Completion(name_esc, start_position=-len(word), display=display_text)
+
+            # Argomento 3: Nome Squadra (opzionale, dopo il prezzo)
+            elif len(args) == 4 or (len(args) == 3 and text_before.endswith(' ')):
+                search = word.replace('"', '')
+                teams = self.db.search_teams_by_name(search)
+                for team_name in teams:
+                    if ' ' in team_name:
+                        team_name = f'"{team_name}"'
+                    yield Completion(team_name, start_position=-len(word))
+
+        # Completamento intelligente per il comando 'move'
+        elif text_before.startswith('move '):
+            try:
+                to_parse = text_before
+                if to_parse.count('"') % 2 != 0:
+                    to_parse += '"'
+                args = shlex.split(to_parse)
+            except Exception:
+                args = text_before.split()
+
+            # Argomento 1: Nome Giocatore acquistato
+            if len(args) == 2 or (len(args) == 1 and text_before.endswith(' ')):
+                search = word.replace('"', '')
+                purchased_players = self.db.search_purchased_players(search, limit=15)
+                for pid, name, team, role, fanta_team, price in purchased_players:
+                    name_esc = f'"{name}"'
+                    display_text = f'[{role}] {name} ({fanta_team} - {price} cr)'
+                    yield Completion(name_esc, start_position=-len(word), display=display_text)
+
+            # Argomento 2: Nuova Squadra
+            elif len(args) == 3 or (len(args) == 2 and text_before.endswith(' ')):
+                search = word.replace('"', '')
+                teams = self.db.search_teams_by_name(search)
+                for team_name in teams:
+                    if ' ' in team_name:
+                        team_name = f'"{team_name}"'
+                    yield Completion(team_name, start_position=-len(word))
+
+            # Argomento 3: Vecchia Squadra (opzionale)
+            elif len(args) == 4 or (len(args) == 3 and text_before.endswith(' ')):
+                search = word.replace('"', '')
+                teams = self.db.search_teams_by_name(search)
+                for team_name in teams:
+                    if ' ' in team_name:
+                        team_name = f'"{team_name}"'
+                    yield Completion(team_name, start_position=-len(word))
+
+
+
