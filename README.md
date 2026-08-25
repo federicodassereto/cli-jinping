@@ -1,4 +1,4 @@
-# 🇨🇳 cli-jinping — FantaAsta CLI
+# <img src="https://flagcdn.com/24x18/cn.png" alt="🇨🇳" width="24"> cli-jinping — FantaAsta CLI
 
 CLI interattiva per gestire l'asta del fantacalcio, con dashboard live in tempo reale.
 
